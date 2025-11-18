@@ -50,3 +50,81 @@ class DeepNoiseApp:
         fft_pred = self.fft_model(input, type_)
         fft_pred = fft_pred.tolist()
         return fft_pred
+
+    def stairs(self,x,y):
+        X = []
+        Y = []
+        X.append(x[0])
+        X.append(x[0])
+        Y.append(y[0])
+        Y.append(y[0])
+        for i in range(1, len(x)):
+            X.append(x[i])
+            X.append(x[i])
+            Y.append(y[i-1])
+            Y.append(y[i])
+        return X, Y
+
+    def inputArrange(self, Qv, DP, RPM):
+        data = []
+        for i in range(len(Qv)):
+            for j in range(len(DP)):
+                for k in range(len(RPM)):
+                    data.append([Qv[i], DP[j], RPM[k]])
+        return np.array(data)
+
+    def dBA_postprocess(self, Qv, DP, RPM, pred):
+        Qv_fig = []
+        DP_fig = []
+        RPM_fig = []
+        for j in range(len(DP)):
+            for k in range(len(RPM)):
+                Qv_fig.append(
+                    dict(
+                        x = Qv,
+                        y = [pred[k+j*len(RPM)+i*len(RPM)*len(DP)] for i in range(len(Qv))],
+                        name=f'DP_{DP[j]}_RPM_{RPM[k]}',
+                        type='scatter'
+                    )
+                )
+        
+        for i in range(len(Qv)):
+            for k in range(len(RPM)):
+                DP_fig.append(
+                    dict(
+                        x = DP,
+                        y = [pred[k+j*len(RPM)+i*len(RPM)*len(DP)] for j in range(len(DP))],
+                        name=f'Qv_{Qv[i]}_RPM_{RPM[k]}',
+                        type='scatter'
+                    )
+                )
+        
+        for i in range(len(Qv)):
+            for j in range(len(DP)):
+                RPM_fig.append(
+                    dict(
+                        x = RPM,
+                        y = [pred[k+j*len(RPM)+i*len(RPM)*len(DP)] for k in range(len(RPM))],
+                        name=f'Qv_{Qv[i]}_DP_{DP[j]}',
+                        type='scatter'
+                    )
+                )
+        return Qv_fig, DP_fig, RPM_fig
+
+    def octave3_postprocess(self, Qv, DP, RPM, pred_fft):
+        fft_array = np.array(pred_fft)
+        y = np.array(range(0,fft_array.shape[1]*64,64))
+        fig = []
+        for i in range(len(Qv)):
+            for j in range(len(DP)):
+                for k in range(len(RPM)):
+                    s_x, s_y = self.stairs(y, pred_fft[k+j*len(RPM)+i*len(RPM)*len(DP)])
+                    fig.append(
+                        dict(
+                            x = s_x,
+                            y = s_y,
+                            name=f'Qv_{Qv[i]}_DP_{DP[j]}_RPM_{RPM[k]}',
+                            type='scatter'
+                        )
+                    )
+        return fig

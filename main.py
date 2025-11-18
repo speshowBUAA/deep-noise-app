@@ -1,26 +1,31 @@
-from flask import Flask, render_template, request, jsonify
+from dataclasses import dataclass
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, g
 import plotly
 import json
 from deepnoiseapp import DeepNoiseApp
 import numpy as np
 
-app = Flask(__name__)
+app = Flask(__name__, static_url_path="/")
+app.config['SECRET_KEY'] = "sdfklas0lk42j"
 app.debug = True
 deep_noise_app = DeepNoiseApp(app)
 
-def stairs(x,y):
-    X = []
-    Y = []
-    X.append(x[0])
-    X.append(x[0])
-    Y.append(y[0])
-    Y.append(y[0])
-    for i in range(1, len(x)):
-        X.append(x[i])
-        X.append(x[i])
-        Y.append(y[i-1])
-        Y.append(y[i])
-    return X, Y
+@dataclass
+class User:
+    id: int
+    username: str
+    password: str
+
+users = [
+	User(1, "admin", "123456"),
+]
+
+@app.before_request
+def before_request():
+    g.user = None
+    if 'user_id' in session:
+        user = [u for u in users if u.id == session['user_id']][0]
+        g.user = user
 
 def parseInterval(request):
     if request.form.get('QvInterval'):
@@ -49,71 +54,7 @@ def parseInterval(request):
         RPMNum = 1
     return QvInterval,QvNum,DPInterval,DPNum,RPMInterval,RPMNum
 
-def inputArrange(Qv, DP, RPM):
-    data = []
-    for i in range(len(Qv)):
-        for j in range(len(DP)):
-            for k in range(len(RPM)):
-                data.append([Qv[i], DP[j], RPM[k]])
-    return np.array(data)
-
-def dBA_postprocess(Qv, DP, RPM, pred):
-    Qv_fig = []
-    DP_fig = []
-    RPM_fig = []
-    for j in range(len(DP)):
-        for k in range(len(RPM)):
-            Qv_fig.append(
-                dict(
-                    x = Qv,
-                    y = [pred[k+j*len(RPM)+i*len(RPM)*len(DP)] for i in range(len(Qv))],
-                    name=f'DP_{DP[j]}_RPM_{RPM[k]}',
-                    type='scatter'
-                )
-            )
-    
-    for i in range(len(Qv)):
-        for k in range(len(RPM)):
-            DP_fig.append(
-                dict(
-                    x = DP,
-                    y = [pred[k+j*len(RPM)+i*len(RPM)*len(DP)] for j in range(len(DP))],
-                    name=f'Qv_{Qv[i]}_RPM_{RPM[k]}',
-                    type='scatter'
-                )
-            )
-    
-    for i in range(len(Qv)):
-        for j in range(len(DP)):
-            RPM_fig.append(
-                dict(
-                    x = RPM,
-                    y = [pred[k+j*len(RPM)+i*len(RPM)*len(DP)] for k in range(len(RPM))],
-                    name=f'Qv_{Qv[i]}_DP_{DP[j]}',
-                    type='scatter'
-                )
-            )
-    return Qv_fig, DP_fig, RPM_fig
-
-def octave3_postprocess(Qv, DP, RPM, pred_fft):
-    fft_array = np.array(pred_fft)
-    y = np.array(range(0,fft_array.shape[1]*64,64))
-    fig = []
-    for i in range(len(Qv)):
-        for j in range(len(DP)):
-            for k in range(len(RPM)):
-                s_x, s_y = stairs(y, pred_fft[k+j*len(RPM)+i*len(RPM)*len(DP)])
-                fig.append(
-                    dict(
-                        x = s_x,
-                        y = s_y,
-                        name=f'Qv_{Qv[i]}_DP_{DP[j]}_RPM_{RPM[k]}',
-                        type='scatter'
-                    )
-                )
-    return fig
-
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/index', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
         Qv = int(request.form.get('Qv'))
@@ -125,10 +66,10 @@ def index():
         Qv = np.array(range(Qv, Qv+QvInterval*QvNum, QvInterval))
         DP = np.array(range(DP, DP+DPInterval*DPNum, DPInterval))
         RPM = np.array(range(RPM, RPM+RPMInterval*RPMNum, RPMInterval))
-        data = inputArrange(Qv, DP, RPM)
+        data = deep_noise_app.inputArrange(Qv, DP, RPM)
         input = {'data': data, 'type': type, 'method': method}
         pred = deep_noise_app.predict(input)
-        Qv_fig, DP_fig, RPM_fig = dBA_postprocess(Qv, DP, RPM, pred)
+        Qv_fig, DP_fig, RPM_fig = deep_noise_app.dBA_postprocess(Qv, DP, RPM, pred)
         graphs = [
             dict(
                 data=Qv_fig,
@@ -198,10 +139,10 @@ def octave_3():
     Qv = np.array(range(Qv, Qv+QvInterval*QvNum, QvInterval))
     DP = np.array(range(DP, DP+DPInterval*DPNum, DPInterval))
     RPM = np.array(range(RPM, RPM+RPMInterval*RPMNum, RPMInterval))
-    data = inputArrange(Qv, DP, RPM)
+    data = deep_noise_app.inputArrange(Qv, DP, RPM)
     input = {'data': data, 'type': type, 'method': method}
     pred_fft = deep_noise_app.predict_3octave(input)
-    octave_fig = octave3_postprocess(Qv, DP, RPM, pred_fft)
+    octave_fig = deep_noise_app.octave3_postprocess(Qv, DP, RPM, pred_fft)
     graphs = [
         dict(
             data=octave_fig,
@@ -224,6 +165,35 @@ def octave_3():
             'fig' : graphJSON
     }
     return jsonify(res)
+
+@app.route("/", methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        # 登录操作
+        session.pop('user_id', None)
+        username = request.form.get("username", None)
+        password = request.form.get("password", None)
+        user = [u for u in users if u.username==username]
+        if len(user) > 0:
+            user = user[0]
+        if user and user.password == password:
+            session['user_id'] = user.id
+            return redirect(url_for('index'))
+        
+    return render_template("login.html")
+
+@app.route("/profile")
+def profile():
+    if not g.user:
+        return redirect(url_for('login'))
+    
+    return render_template("profile.html")
+
+
+@app.route("/logout")
+def logout():
+    session.pop("user_id", None)
+    return redirect(url_for('login'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=9999)
